@@ -31,7 +31,7 @@ class video_jobs {
     // collide with the file_managed table.
     $oldstatus = $video->status;
     $video->status = $video->video_status;
-    $result = drupal_write_record('video_queue', $video, 'fid') === SAVED_UPDATED;
+    $result = drupal_write_record('video_queue', $video, 'vid') === SAVED_UPDATED;
     $video->status = $oldstatus;
 
     return $result;
