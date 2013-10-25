@@ -175,7 +175,7 @@ class Transcoder {
         $output_name = file_munge_filename(str_replace(' ', '_', pathinfo($video->filename, PATHINFO_FILENAME) . ' ' . strtolower($name)) . '_' . time() . '.' . $preset['settings']['video_extension'], '');
         $this->transcoder->setOutput($output_directory, $output_name);
         if ($output_file = $this->transcoder->execute()) {
-          $output_file->preset = $preset['pid'];
+          $output_file->preset = $name;
           $output[] = $output_file;
         }
         else {

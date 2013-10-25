@@ -475,3 +475,19 @@ function video_page_alter(&$page) {
     }
   }
 }
+
+/**
+ * Returns a list with all available device types.
+ */
+function video_get_all_device_types() {
+  return array(
+    'type_1' => 'Type 1', 'type_2' => 'Type 2', 'type_3' => 'Type 3',
+  );
+}
+
+/**
+ * Returns the current device type.
+ */
+function video_get_current_device_type() {
+  return 'type_1';
+}

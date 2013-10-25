@@ -190,9 +190,10 @@ function video_schema() {
       ),
       'preset' => array(
         'description' => 'The name of the preset used.',
-        'type' => 'int',
-        'not null' => FALSE,
-        'default' => NULL,
+        'type' => 'varchar',
+        'length' => 64,
+        'not null' => TRUE,
+        'default' => '',
       ),
     ),
     'indexes' => array(

@@ -1086,7 +1086,6 @@ function video_field_formatter_settings_summary($field, $instance, $view_mode) {
 function video_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
   $element = array();
   $settings = $display['settings'];
-
   foreach ($items as $delta => $item) {
     switch ($display['type']) {
       case 'video_formatter_thumbnail':
@@ -1128,9 +1127,13 @@ function video_field_formatter_view($entity_type, $entity, $field, $instance, $l
         break;
 
       case 'video_formatter_player':
+        // In this case, if we have more playable files, we have to decide which
+        // one to use depending on the device we show the field and the preset
+        // that was used to convert the file.
+        $playable_item = video_filter_playable_items($item);
         $element[$delta] = array(
           '#theme' => 'video_formatter_player',
-          '#item' => $item,
+          '#item' => $playable_item,
           '#entity' => $entity,
           '#entity_type' => $entity_type,
           '#field' => $field,
@@ -1143,6 +1146,53 @@ function video_field_formatter_view($entity_type, $entity, $field, $instance, $l
   }
 
   return $element;
+}
+
+/**
+ * Filters the playable items from a video field, depending on the device.
+ *
+ * @param array $item
+ *  The field. @see video_field_formatter_view().
+ *
+ * @return
+ *  An array with the same structure as $item, but with only one item in the
+ *  'playablefiles' key.
+ */
+function video_filter_playable_items($item) {
+  $current_device_type = video_get_current_device_type();
+  $playable_item = $item;
+  unset($playable_item['playablefiles']);
+  // Iterate through all the playable files of the item, and when we find one
+  // that has a preset that we can display on the current device, just use it.
+  // A default playable file is a file that can be used on any device type. If
+  // we cannot find a more specific device type, then we use it.
+  $default_playablefile = NULL;
+  foreach ($item['playablefiles'] as $file) {
+    if (!empty($file->preset)) {
+      // @todo: This method call is the most expensive part of this function.
+      // It takes much longer than any other calls. If possible to improve it,
+      // it would be good.
+      $preset = Preset::getPreset($file->preset);
+      // If we have not device type settings, this is a default preset.
+      if (empty($preset['settings']['video_device'])) {
+        $default_playablefile = $file;
+        continue;
+      }
+      else {
+        $types = explode(',', $preset['settings']['video_device']);
+        if (in_array($current_device_type, $types)) {
+          $playable_item['playablefiles'][] = $file;
+          break;
+        }
+      }
+    }
+  }
+  // If we did not find a better option than the default playable file, then
+  // use it.
+  if (empty($playable_item['playablefiles']) && !empty($default_playablefile)) {
+    $playable_item['playablefiles'][] = $default_playablefile;
+  }
+  return $playable_item;
 }
 
 /**

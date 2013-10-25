@@ -199,6 +199,14 @@ function video_preset_form($form, &$form_state, $preset = FALSE) {
     '#description' => t('If the input file is smaller than the target output, should the file be upscaled to the target size?'),
     '#default_value' => !empty($settings['video_upscale']) ? $settings['video_upscale'] : ''
   );
+  $form['settings']['video']['video_device'] = array(
+    '#type' => 'select',
+    '#title' => t('Use on device'),
+    '#multiple' => TRUE,
+    '#options' => video_get_all_device_types(),
+    '#description' => t('Choose the devices where the videos converted using this preset will be shown. Choose none for all device types.'),
+    '#default_value' => !empty($settings['video_device']) ? explode(',', $settings['video_device']) : '',
+  );
 
   // audio settings
   $form['settings']['audio'] = array(
@@ -611,6 +619,10 @@ function video_preset_submit($form, &$form_state) {
   $preset['description'] = $v['description'];
   // unset unwanted values saved to database
   unset($v['name'], $v['description'], $v['submit'], $v['delete'], $v['form_build_id'], $v['form_token'], $v['form_id'], $v['op'], $v['revert']);
+  // Some special processing for the 'video_device';
+  if (isset($v['video_device'])) {
+    $v['video_device'] = !empty($v['video_device']) ? implode(',', $v['video_device']) : '';
+  }
   $preset['settings'] = video_preset_array_flatten($v);
 
   // Save this preset.
