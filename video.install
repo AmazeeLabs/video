@@ -188,6 +188,12 @@ function video_schema() {
         'not null' => FALSE,
         'default' => NULL,
       ),
+      'preset' => array(
+        'description' => 'The name of the preset used.',
+        'type' => 'int',
+        'not null' => FALSE,
+        'default' => NULL,
+      ),
     ),
     'indexes' => array(
       'original_fid' => array('original_fid'),
@@ -547,4 +553,14 @@ function video_update_7210(&$sandbox) {
     'initial' => time(),
   );
   db_add_field('video_queue', 'statusupdated', $new_field);
+}
+
+/**
+ * Implements hook_update_N().
+ *
+ * Adds the preset field to the video_output table.
+ */
+function video_update_7211() {
+  $schema = video_schema();
+  db_add_field('video_output', 'preset', $schema['video_output']['fields']['preset']);
 }

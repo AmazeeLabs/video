@@ -679,7 +679,7 @@ function video_field_widget_value($element, $input = FALSE, $form_state) {
         }
 
         // If there is no job, it might be because the user selected
-        // "bypass autoconversion" previously. When the file is permanent, 
+        // "bypass autoconversion" previously. When the file is permanent,
         // this probably was the case.
         if (isset($value['status']) && $value['status'] == FILE_STATUS_PERMANENT) {
           $value['bypass_autoconversion'] = 1;

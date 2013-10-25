@@ -175,6 +175,7 @@ class Transcoder {
         $output_name = file_munge_filename(str_replace(' ', '_', pathinfo($video->filename, PATHINFO_FILENAME) . ' ' . strtolower($name)) . '_' . time() . '.' . $preset['settings']['video_extension'], '');
         $this->transcoder->setOutput($output_directory, $output_name);
         if ($output_file = $this->transcoder->execute()) {
+          $output_file->preset = $preset['pid'];
           $output[] = $output_file;
         }
         else {
@@ -209,6 +210,7 @@ class Transcoder {
           'original_fid' => $video->fid,
           'output_fid' => $file->fid,
           'job_id' => !empty($file->jobid) ? $file->jobid : NULL,
+          'preset' => $file->preset,
         );
         drupal_write_record('video_output', $output_vid);
       }
