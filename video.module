@@ -481,7 +481,7 @@ function video_page_alter(&$page) {
  */
 function video_get_all_device_types() {
   return array(
-    'type_1' => 'Type 1', 'type_2' => 'Type 2', 'type_3' => 'Type 3',
+    'desktop' => t('Desktop'), 'mobile' => t('Mobile'),
   );
 }
 
@@ -489,5 +489,9 @@ function video_get_all_device_types() {
  * Returns the current device type.
  */
 function video_get_current_device_type() {
-  return 'type_1';
+  if (preg_match('/Android|webOS|iPhone|iPod|iPad|BlackBerry|IEMobile|Opera Mini/i', $_SERVER['HTTP_USER_AGENT'])) {
+    return 'mobile';
+  } else {
+    return 'desktop';
+  }
 }
