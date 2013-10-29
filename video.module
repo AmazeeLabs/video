@@ -490,10 +490,8 @@ function video_get_all_device_types() {
  */
 function video_get_current_device_type() {
   if (preg_match('/Android|webOS|iPhone|iPod|iPad|BlackBerry|IEMobile|Opera Mini/i', $_SERVER['HTTP_USER_AGENT'])) {
-    watchdog('video_debug', 'user_agent: ' . $_SERVER['HTTP_USER_AGENT'] . '; RETURNED mobile.', NULL);
     return 'mobile';
   } else {
-    watchdog('video_debug', 'user_agent: ' . $_SERVER['HTTP_USER_AGENT'] . '; RETURNED desktop.', NULL);
     return 'desktop';
   }
 }
