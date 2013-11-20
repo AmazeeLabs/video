@@ -773,8 +773,9 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       echo 'OK';
     }
     else {
+      drupal_add_http_header('Status', '503 Service Temporarily Unavailable');
       echo 'Lock could not be acquired.';
-      return ;
+      exit();
     }
   }
 
