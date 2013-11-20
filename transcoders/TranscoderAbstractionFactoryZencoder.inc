@@ -772,6 +772,10 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
 
       echo 'OK';
     }
+    else {
+      echo 'Lock could not be acquired.';
+      return ;
+    }
   }
 
   private function moveFile($srcurl, $dsturi) {
