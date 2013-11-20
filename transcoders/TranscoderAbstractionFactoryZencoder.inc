@@ -560,213 +560,218 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       return;
     }
 
-    $fid = intval($video_output->original_fid);
-    watchdog('transcoder', 'Postback received from Zencoder for fid: @fid, Zencoder job id: @jobid.', array('@fid' => $fid, '@jobid' => $jobid));
+    // Put a lock on this video.
+    if (lock_acquire('video_conversion_' . $video_output->vid, 60)) {
+      // Register a shutdown function to release the lock.
+      drupal_register_shutdown_function('lock_release', 'video_conversion_' . $video_output->vid);
+      $fid = intval($video_output->original_fid);
+      watchdog('transcoder', 'Postback received from Zencoder for fid: @fid, Zencoder job id: @jobid.', array('@fid' => $fid, '@jobid' => $jobid));
 
-    // Find the transcoding job.
-    $video = video_jobs::load($fid);
-    if (empty($video)) {
-      echo 'Transcoding job not found in database';
-      return;
-    }
-
-    // Zencoder API 2.1.0 and above use $notification->job->outputs.
-    // For now, only one output is supported.
-    $output = isset($notification->output) ? $notification->output :  current($notification->job->outputs);
-
-    // Find all error situations
-    if ($output->state === 'cancelled') {
-      watchdog('transcoder', 'Video with fid @fid and job id @jobid is marked as failed because a cancellation notification was received from Zencoder.', array('@fid' => $fid, '@jobid' => $jobid), WATCHDOG_WARNING);
-      video_jobs::setFailed($video);
-      echo 'Cancelled';
-      return;
-    }
-
-    if ($output->state === 'failed') {
-      $errorlink = t('no specific information given');
-      if (!empty($output->error_message)) {
-        if (!empty($output->error_link)) {
-          $errordetail = l(t($output->error_message), $output->error_link);
-        }
-        else {
-          $errordetail = t($output->error_message);
-        }
+      // Find the transcoding job.
+      $video = video_jobs::load($fid);
+      if (empty($video)) {
+        echo 'Transcoding job not found in database';
+        return;
       }
 
-      watchdog('transcoder', 'Zencoder reports errors in postback for fid @fid, job id @jobid: !errordetail', array('@fid' => $fid, '@jobid' => $jobid, '!errordetail' => $errordetail), WATCHDOG_ERROR);
-      video_jobs::setFailed($video);
-      echo 'Failure';
-      return;
-    }
+      // Zencoder API 2.1.0 and above use $notification->job->outputs.
+      // For now, only one output is supported.
+      $output = isset($notification->output) ? $notification->output :  current($notification->job->outputs);
 
-    if ($notification->job->state !== 'finished') {
-      echo 'Not finished';
-      return;
-    }
-
-    // Move the converted video to its final destination
-    $outputfile = file_load($video_output->output_fid);
-    if (empty($outputfile)) {
-      echo 'Output file not found in database';
-      return;
-    }
-
-    // Sometimes the long duration of the copy() call causes Zencoder
-    // to timeout and retry the notification postback later.
-    // So we only copy the file when it doesn't exist or has a different file size.
-    // file_save() invokes filesize(), which may return a cached value.
-    // Clear the stat cache to get a fresh value.
-    clearstatcache();
-    if (!file_exists($outputfile->uri) || filesize($outputfile->uri) != $output->file_size_in_bytes) {
-      if (!$this->moveFile($output->url, $outputfile->uri)) {
-        watchdog('transcoder', 'While processing Zencoder postback, failed to copy @source-uri to @target-uri.', array('@source-uri' => $output->url, '@target-uri' => $outputfile->uri), WATCHDOG_ERROR);
+      // Find all error situations
+      if ($output->state === 'cancelled') {
+        watchdog('transcoder', 'Video with fid @fid and job id @jobid is marked as failed because a cancellation notification was received from Zencoder.', array('@fid' => $fid, '@jobid' => $jobid), WATCHDOG_WARNING);
         video_jobs::setFailed($video);
-        echo 'Error while moving';
+        echo 'Cancelled';
         return;
       }
-    }
 
-    $outputfile->filesize = $output->file_size_in_bytes;
-    file_save($outputfile);
+      if ($output->state === 'failed') {
+        $errorlink = t('no specific information given');
+        if (!empty($output->error_message)) {
+          if (!empty($output->error_link)) {
+            $errordetail = l(t($output->error_message), $output->error_link);
+          }
+          else {
+            $errordetail = t($output->error_message);
+          }
+        }
 
-    // Actual processing of the response
-    $video->duration = round($output->duration_in_ms / 1000);
-    video_jobs::setCompleted($video);
-
-    // Clear the field cache. Normally, node_save() does this, but that function is not invoked in all cases
-    video_utility::clearEntityCache($video->entity_type, $video->entity_id);
-
-    // If there are no thumbnails, quit now.
-    if (empty($output->thumbnails)) {
-      echo 'No thumbnails';
-      return;
-    }
-
-    // Retrieve the thumbnails from the notification structure
-    // Pre-2.1.0, each thumbnail list was an array, now it is an object
-    $thumbnails = is_array($output->thumbnails[0]) ? $output->thumbnails[0]['images'] : $output->thumbnails[0]->images;
-    if (empty($thumbnails)) {
-      echo 'No thumbnails 2';
-      return;
-    }
-
-    // Find the entity to which the file belongs
-    $entity = video_utility::loadEntity($video->entity_type, $video->entity_id);
-    if (empty($entity)) {
-      watchdog('transcoder', 'The entity to which the transcoded video belongs can\'t be found anymore. Entity type: @entity-type, entity id: @entity-id.', array('@entity-type' => $video->entity_type, '@entity-id' => $video->entity_id), WATCHDOG_ERROR);
-      echo 'No entity';
-      return;
-    }
-
-    // The following information was saved in video_jobs::create()
-    $fieldname = $video->data['field_name'];
-    $field = field_info_field($fieldname);
-    $langcode = $video->data['langcode'];
-    $delta = $video->data['delta'];
-
-    // Insanity checks
-    if (empty($entity->{$fieldname}[$langcode][$delta])) {
-      // The field can't be found anymore. This may be a problem.
-      watchdog('transcoder', 'The field to which video @filename was uploaded doesn\'t seem to exist anymore. Entity type: @entity-type, entity id: @entity-id, field name: @fieldname, field language: @langcode, delta: @delta.', array('@filename' => $video->filename, '@entity-type' => $video->entity_type, '@entity-id' => $video->entity_id, '@fieldname' => $fieldname, '@langcode' => $langcode, '@delta' => $delta), WATCHDOG_WARNING);
-      echo 'No field';
-      return;
-    }
-    if ($entity->{$fieldname}[$langcode][$delta]['fid'] != $video->fid) {
-      // The field does not contain the file we uploaded.
-      watchdog('transcoder', 'The field to which video @filename was uploaded doesn\'t seem to contain this video anymore. Entity type: @entity-type, entity id: @entity-id, field name: @fieldname, field language: @langcode, delta: @delta.', array('@filename' => $video->filename, '@entity-type' => $video->entity_type, '@entity-id' => $video->entity_id, '@fieldname' => $fieldname, '@langcode' => $langcode, '@delta' => $delta), WATCHDOG_WARNING);
-      echo 'No field in entity';
-      return;
-    }
-
-    // Destination of thumbnails
-    $thumbscheme = !empty($field['settings']['uri_scheme_thumbnails']) ? $field['settings']['uri_scheme_thumbnails'] : 'public';
-    $thumburibase =  $thumbscheme . '://' . variable_get('video_thumbnail_path', 'videos/thumbnails') . '/' . $video->fid . '/';
-    file_prepare_directory($thumburibase, FILE_CREATE_DIRECTORY);
-    $thumbwrapper = file_stream_wrapper_get_instance_by_scheme($thumbscheme);
-
-    // Turn the thumbnails into managed files.
-    // Because two jobs for the same video may finish simultaneously, lock here so
-    // there are no errors when inserting the files.
-    if (!lock_acquire('video_zencoder_thumbnails:' . $video->fid, count($thumbnails) * 30)) {
-      if (lock_wait('video_zencoder_thumbnails:' . $video->fid, count($thumbnails) * 30)) {
-        watchdog('transcoder', 'Failed to acquire lock to download thumbnails for @video-filename.', array('@video-filename' => $video->filename), WATCHDOG_ERROR);
+        watchdog('transcoder', 'Zencoder reports errors in postback for fid @fid, job id @jobid: !errordetail', array('@fid' => $fid, '@jobid' => $jobid, '!errordetail' => $errordetail), WATCHDOG_ERROR);
+        video_jobs::setFailed($video);
+        echo 'Failure';
         return;
       }
-    }
 
-    $existingthumbs = db_query('SELECT f.uri, f.fid, f.filesize FROM {file_managed} f INNER JOIN {video_thumbnails} t ON (f.fid = t.thumbnailfid) WHERE t.videofid = :fid', array(':fid' => $video->fid))->fetchAllAssoc('uri');
-    $thumbs = array();
-    $tnid = 0;
-    foreach ($thumbnails as $thumbnail) {
-      // Pre-2.1.0, each thumbnail was an array
-      $thumbnail = (object)$thumbnail;
-      $urlpath = parse_url($thumbnail->url, PHP_URL_PATH);
-      $ext = video_utility::getExtension($urlpath);
-      $thumb = new stdClass();
-      $thumb->uid = $outputfile->uid; // $entity may not have a uid property, so take it from the output file.
-      $thumb->status = FILE_STATUS_PERMANENT;
-      $thumb->filename = 'thumbnail-' . $video->fid . '_' . sprintf('%04d', $tnid++) . '.' . $ext;
-      $thumb->uri = $thumburibase . $thumb->filename;
-      $thumb->filemime = $thumbwrapper->getMimeType($thumb->uri);
-      $thumb->type = 'image'; // For the media module
-      $thumb->filesize = $thumbnail->file_size_bytes;
-      $thumb->timestamp = REQUEST_TIME;
+      if ($notification->job->state !== 'finished') {
+        echo 'Not finished';
+        return;
+      }
 
-      $shouldcopy = TRUE;
-      if (isset($existingthumbs[$thumb->uri])) {
-        // If the thumbnail has the same size in the database compared to the notification data, don't copy
-        if (file_exists($thumb->uri) && $existingthumbs[$thumb->uri]->filesize == $thumb->filesize) {
-          $shouldcopy = FALSE;
+      // Move the converted video to its final destination
+      $outputfile = file_load($video_output->output_fid);
+      if (empty($outputfile)) {
+        echo 'Output file not found in database';
+        return;
+      }
+
+      // Sometimes the long duration of the copy() call causes Zencoder
+      // to timeout and retry the notification postback later.
+      // So we only copy the file when it doesn't exist or has a different file size.
+      // file_save() invokes filesize(), which may return a cached value.
+      // Clear the stat cache to get a fresh value.
+      clearstatcache();
+      if (!file_exists($outputfile->uri) || filesize($outputfile->uri) != $output->file_size_in_bytes) {
+        if (!$this->moveFile($output->url, $outputfile->uri)) {
+          watchdog('transcoder', 'While processing Zencoder postback, failed to copy @source-uri to @target-uri.', array('@source-uri' => $output->url, '@target-uri' => $outputfile->uri), WATCHDOG_ERROR);
+          video_jobs::setFailed($video);
+          echo 'Error while moving';
+          return;
         }
-        $thumb->fid = intval($existingthumbs[$thumb->uri]->fid);
       }
 
-      if ($shouldcopy && !$this->moveFile($thumbnail->url, $thumb->uri)) {
-        watchdog('transcoder', 'Could not copy @thumbsrc to @thumbdest.', array('@thumbsrc' => $thumbnail->url, '@thumbdest' => $thumb->uri), WATCHDOG_ERROR);
-        continue;
+      $outputfile->filesize = $output->file_size_in_bytes;
+      file_save($outputfile);
+
+      // Actual processing of the response
+      $video->duration = round($output->duration_in_ms / 1000);
+      video_jobs::setCompleted($video);
+
+      // Clear the field cache. Normally, node_save() does this, but that function is not invoked in all cases
+      video_utility::clearEntityCache($video->entity_type, $video->entity_id);
+
+      // If there are no thumbnails, quit now.
+      if (empty($output->thumbnails)) {
+        echo 'No thumbnails';
+        return;
       }
 
-      file_save($thumb);
-
-      // Saving to video_thumbnails and file_usage is only necessary when this is a new thumbnail
-      if (!isset($existingthumbs[$thumb->uri])) {
-        db_insert('video_thumbnails')->fields(array('videofid' => $video->fid, 'thumbnailfid' => $thumb->fid))->execute();
-        file_usage_add($thumb, 'file', $video->entity_type, $video->entity_id);
+      // Retrieve the thumbnails from the notification structure
+      // Pre-2.1.0, each thumbnail list was an array, now it is an object
+      $thumbnails = is_array($output->thumbnails[0]) ? $output->thumbnails[0]['images'] : $output->thumbnails[0]->images;
+      if (empty($thumbnails)) {
+        echo 'No thumbnails 2';
+        return;
       }
 
-      $thumbs[$thumb->fid] = $thumb;
-    }
-    lock_release('video_zencoder_thumbnails:' . $video->fid);
+      // Find the entity to which the file belongs
+      $entity = video_utility::loadEntity($video->entity_type, $video->entity_id);
+      if (empty($entity)) {
+        watchdog('transcoder', 'The entity to which the transcoded video belongs can\'t be found anymore. Entity type: @entity-type, entity id: @entity-id.', array('@entity-type' => $video->entity_type, '@entity-id' => $video->entity_id), WATCHDOG_ERROR);
+        echo 'No entity';
+        return;
+      }
 
-    // Clear the field cache. Normally, node_save() does this, but that function is not invoked in all cases
-    video_utility::clearEntityCache($video->entity_type, $video->entity_id);
+      // The following information was saved in video_jobs::create()
+      $fieldname = $video->data['field_name'];
+      $field = field_info_field($fieldname);
+      $langcode = $video->data['langcode'];
+      $delta = $video->data['delta'];
 
-    // Skip setting the thumbnail if there are no thumbnails or when the current value is already valid
-    $currentthumb = isset($entity->{$fieldname}[$langcode][$delta]['thumbnail']) ? intval($entity->{$fieldname}[$langcode][$delta]['thumbnail']) : 0;
-    if (empty($thumbs) || isset($thumbs[$currentthumb])) {
-      echo 'OK: Thumbnail already set';
-      return;
-    }
+      // Insanity checks
+      if (empty($entity->{$fieldname}[$langcode][$delta])) {
+        // The field can't be found anymore. This may be a problem.
+        watchdog('transcoder', 'The field to which video @filename was uploaded doesn\'t seem to exist anymore. Entity type: @entity-type, entity id: @entity-id, field name: @fieldname, field language: @langcode, delta: @delta.', array('@filename' => $video->filename, '@entity-type' => $video->entity_type, '@entity-id' => $video->entity_id, '@fieldname' => $fieldname, '@langcode' => $langcode, '@delta' => $delta), WATCHDOG_WARNING);
+        echo 'No field';
+        return;
+      }
+      if ($entity->{$fieldname}[$langcode][$delta]['fid'] != $video->fid) {
+        // The field does not contain the file we uploaded.
+        watchdog('transcoder', 'The field to which video @filename was uploaded doesn\'t seem to contain this video anymore. Entity type: @entity-type, entity id: @entity-id, field name: @fieldname, field language: @langcode, delta: @delta.', array('@filename' => $video->filename, '@entity-type' => $video->entity_type, '@entity-id' => $video->entity_id, '@fieldname' => $fieldname, '@langcode' => $langcode, '@delta' => $delta), WATCHDOG_WARNING);
+        echo 'No field in entity';
+        return;
+      }
 
-    // Set a random thumbnail fid on the entity and save the entity
-    $entity->{$fieldname}[$langcode][$delta]['thumbnail'] = array_rand($thumbs);
+      // Destination of thumbnails
+      $thumbscheme = !empty($field['settings']['uri_scheme_thumbnails']) ? $field['settings']['uri_scheme_thumbnails'] : 'public';
+      $thumburibase =  $thumbscheme . '://' . variable_get('video_thumbnail_path', 'videos/thumbnails') . '/' . $video->fid . '/';
+      file_prepare_directory($thumburibase, FILE_CREATE_DIRECTORY);
+      $thumbwrapper = file_stream_wrapper_get_instance_by_scheme($thumbscheme);
 
-    switch ($video->entity_type) {
-      case 'node':
-        node_save($entity);
-        break;
-      case 'comment':
-        comment_save($entity);
-        break;
-      default:
-        // entity_save() is supplied by the entity module
-        if (function_exists('entity_save')) {
-          entity_save($video->entity_type, $entity);
+      // Turn the thumbnails into managed files.
+      // Because two jobs for the same video may finish simultaneously, lock here so
+      // there are no errors when inserting the files.
+      if (!lock_acquire('video_zencoder_thumbnails:' . $video->fid, count($thumbnails) * 30)) {
+        if (lock_wait('video_zencoder_thumbnails:' . $video->fid, count($thumbnails) * 30)) {
+          watchdog('transcoder', 'Failed to acquire lock to download thumbnails for @video-filename.', array('@video-filename' => $video->filename), WATCHDOG_ERROR);
+          return;
         }
-        break;
-    }
+      }
 
-    echo 'OK';
+      $existingthumbs = db_query('SELECT f.uri, f.fid, f.filesize FROM {file_managed} f INNER JOIN {video_thumbnails} t ON (f.fid = t.thumbnailfid) WHERE t.videofid = :fid', array(':fid' => $video->fid))->fetchAllAssoc('uri');
+      $thumbs = array();
+      $tnid = 0;
+      foreach ($thumbnails as $thumbnail) {
+        // Pre-2.1.0, each thumbnail was an array
+        $thumbnail = (object)$thumbnail;
+        $urlpath = parse_url($thumbnail->url, PHP_URL_PATH);
+        $ext = video_utility::getExtension($urlpath);
+        $thumb = new stdClass();
+        $thumb->uid = $outputfile->uid; // $entity may not have a uid property, so take it from the output file.
+        $thumb->status = FILE_STATUS_PERMANENT;
+        $thumb->filename = 'thumbnail-' . $video->fid . '_' . sprintf('%04d', $tnid++) . '.' . $ext;
+        $thumb->uri = $thumburibase . $thumb->filename;
+        $thumb->filemime = $thumbwrapper->getMimeType($thumb->uri);
+        $thumb->type = 'image'; // For the media module
+        $thumb->filesize = $thumbnail->file_size_bytes;
+        $thumb->timestamp = REQUEST_TIME;
+
+        $shouldcopy = TRUE;
+        if (isset($existingthumbs[$thumb->uri])) {
+          // If the thumbnail has the same size in the database compared to the notification data, don't copy
+          if (file_exists($thumb->uri) && $existingthumbs[$thumb->uri]->filesize == $thumb->filesize) {
+            $shouldcopy = FALSE;
+          }
+          $thumb->fid = intval($existingthumbs[$thumb->uri]->fid);
+        }
+
+        if ($shouldcopy && !$this->moveFile($thumbnail->url, $thumb->uri)) {
+          watchdog('transcoder', 'Could not copy @thumbsrc to @thumbdest.', array('@thumbsrc' => $thumbnail->url, '@thumbdest' => $thumb->uri), WATCHDOG_ERROR);
+          continue;
+        }
+
+        file_save($thumb);
+
+        // Saving to video_thumbnails and file_usage is only necessary when this is a new thumbnail
+        if (!isset($existingthumbs[$thumb->uri])) {
+          db_insert('video_thumbnails')->fields(array('videofid' => $video->fid, 'thumbnailfid' => $thumb->fid))->execute();
+          file_usage_add($thumb, 'file', $video->entity_type, $video->entity_id);
+        }
+
+        $thumbs[$thumb->fid] = $thumb;
+      }
+      lock_release('video_zencoder_thumbnails:' . $video->fid);
+
+      // Clear the field cache. Normally, node_save() does this, but that function is not invoked in all cases
+      video_utility::clearEntityCache($video->entity_type, $video->entity_id);
+
+      // Skip setting the thumbnail if there are no thumbnails or when the current value is already valid
+      $currentthumb = isset($entity->{$fieldname}[$langcode][$delta]['thumbnail']) ? intval($entity->{$fieldname}[$langcode][$delta]['thumbnail']) : 0;
+      if (empty($thumbs) || isset($thumbs[$currentthumb])) {
+        echo 'OK: Thumbnail already set';
+        return;
+      }
+
+      // Set a random thumbnail fid on the entity and save the entity
+      $entity->{$fieldname}[$langcode][$delta]['thumbnail'] = array_rand($thumbs);
+
+      switch ($video->entity_type) {
+        case 'node':
+          node_save($entity);
+          break;
+        case 'comment':
+          comment_save($entity);
+          break;
+        default:
+          // entity_save() is supplied by the entity module
+          if (function_exists('entity_save')) {
+            entity_save($video->entity_type, $entity);
+          }
+          break;
+      }
+
+      echo 'OK';
+    }
   }
 
   private function moveFile($srcurl, $dsturi) {

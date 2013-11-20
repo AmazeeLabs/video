@@ -495,3 +495,4 @@ function video_get_current_device_type() {
     return 'desktop';
   }
 }
+
