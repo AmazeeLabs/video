@@ -546,6 +546,12 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       return;
     }
 
+    // TODO: remove debug.
+    include_once DRUPAL_ROOT . '/includes/utility.inc';
+    watchdog('transcoder', 'Zencoder postback:<pre>@debug</pre>', array(
+      '@debug' => drupal_var_export(json_decode(trim(file_get_contents('php://input')), TRUE)),
+    ));
+
     if (!isset($notification->job->id)) {
       watchdog('transcoder', 'Postback received from Zencoder is missing the job-id parameter');
       echo 'Invalid data';
