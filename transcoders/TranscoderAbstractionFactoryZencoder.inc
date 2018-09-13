@@ -613,7 +613,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
         return;
       }
 
-      if ($notification->job->state !== 'finished') {
+      if ($output->state !== 'finished') {
         echo 'Not finished';
         watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': job not finished.'); // TODO: delete later.
         return;
