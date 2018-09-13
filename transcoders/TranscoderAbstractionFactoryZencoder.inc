@@ -548,7 +548,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
 
     // TODO: remove debug.
     include_once DRUPAL_ROOT . '/includes/utility.inc';
-    watchdog('transcoder', 'Zencoder postback:<pre>@debug</pre>', array(
+    watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': <pre>@debug</pre>', array(
       '@debug' => drupal_var_export(json_decode(trim(file_get_contents('php://input')), TRUE)),
     ));
 
@@ -563,6 +563,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
     $video_output = db_query('SELECT vid, original_fid, output_fid FROM {video_output} WHERE job_id = :job_id', array(':job_id' => $jobid))->fetch();
     if (empty($video_output)) {
       echo 'Not found';
+      watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': video output not found.'); // TODO: delete later.
       return;
     }
 
@@ -577,6 +578,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       $video = video_jobs::load($fid);
       if (empty($video)) {
         echo 'Transcoding job not found in database';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': job not found.'); // TODO: delete later.
         return;
       }
 
@@ -589,6 +591,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
         watchdog('transcoder', 'Video with fid @fid and job id @jobid is marked as failed because a cancellation notification was received from Zencoder.', array('@fid' => $fid, '@jobid' => $jobid), WATCHDOG_WARNING);
         video_jobs::setFailed($video);
         echo 'Cancelled';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': cancelled.'); // TODO: delete later.
         return;
       }
 
@@ -606,11 +609,13 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
         watchdog('transcoder', 'Zencoder reports errors in postback for fid @fid, job id @jobid: !errordetail', array('@fid' => $fid, '@jobid' => $jobid, '!errordetail' => $errordetail), WATCHDOG_ERROR);
         video_jobs::setFailed($video);
         echo 'Failure';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': failure.'); // TODO: delete later.
         return;
       }
 
       if ($notification->job->state !== 'finished') {
         echo 'Not finished';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': job not finished.'); // TODO: delete later.
         return;
       }
 
@@ -618,6 +623,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       $outputfile = file_load($video_output->output_fid);
       if (empty($outputfile)) {
         echo 'Output file not found in database';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': cannot load file.'); // TODO: delete later.
         return;
       }
 
@@ -632,16 +638,19 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
           watchdog('transcoder', 'While processing Zencoder postback, failed to copy @source-uri to @target-uri.', array('@source-uri' => $output->url, '@target-uri' => $outputfile->uri), WATCHDOG_ERROR);
           video_jobs::setFailed($video);
           echo 'Error while moving';
+          watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': cannot move file.'); // TODO: delete later.
           return;
         }
       }
 
       $outputfile->filesize = $output->file_size_in_bytes;
       file_save($outputfile);
+      watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': file saved.'); // TODO: delete later.
 
       // Actual processing of the response
       $video->duration = round($output->duration_in_ms / 1000);
       video_jobs::setCompleted($video);
+      watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': set job completed.'); // TODO: delete later.
 
       // Clear the field cache. Normally, node_save() does this, but that function is not invoked in all cases
       video_utility::clearEntityCache($video->entity_type, $video->entity_id);
@@ -649,6 +658,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       // If there are no thumbnails, quit now.
       if (empty($output->thumbnails)) {
         echo 'No thumbnails';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': no thumbnails.'); // TODO: delete later.
         return;
       }
 
@@ -657,6 +667,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       $thumbnails = is_array($output->thumbnails[0]) ? $output->thumbnails[0]['images'] : $output->thumbnails[0]->images;
       if (empty($thumbnails)) {
         echo 'No thumbnails 2';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': no thumbnails 2.'); // TODO: delete later.
         return;
       }
 
@@ -665,6 +676,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       if (empty($entity)) {
         watchdog('transcoder', 'The entity to which the transcoded video belongs can\'t be found anymore. Entity type: @entity-type, entity id: @entity-id.', array('@entity-type' => $video->entity_type, '@entity-id' => $video->entity_id), WATCHDOG_ERROR);
         echo 'No entity';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': no entity.'); // TODO: delete later.
         return;
       }
 
@@ -679,12 +691,14 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
         // The field can't be found anymore. This may be a problem.
         watchdog('transcoder', 'The field to which video @filename was uploaded doesn\'t seem to exist anymore. Entity type: @entity-type, entity id: @entity-id, field name: @fieldname, field language: @langcode, delta: @delta.', array('@filename' => $video->filename, '@entity-type' => $video->entity_type, '@entity-id' => $video->entity_id, '@fieldname' => $fieldname, '@langcode' => $langcode, '@delta' => $delta), WATCHDOG_WARNING);
         echo 'No field';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': no field.'); // TODO: delete later.
         return;
       }
       if ($entity->{$fieldname}[$langcode][$delta]['fid'] != $video->fid) {
         // The field does not contain the file we uploaded.
         watchdog('transcoder', 'The field to which video @filename was uploaded doesn\'t seem to contain this video anymore. Entity type: @entity-type, entity id: @entity-id, field name: @fieldname, field language: @langcode, delta: @delta.', array('@filename' => $video->filename, '@entity-type' => $video->entity_type, '@entity-id' => $video->entity_id, '@fieldname' => $fieldname, '@langcode' => $langcode, '@delta' => $delta), WATCHDOG_WARNING);
         echo 'No field in entity';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': no field in entity.'); // TODO: delete later.
         return;
       }
 
@@ -700,6 +714,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       if (!lock_acquire('video_zencoder_thumbnails:' . $video->fid, count($thumbnails) * 30)) {
         if (lock_wait('video_zencoder_thumbnails:' . $video->fid, count($thumbnails) * 30)) {
           watchdog('transcoder', 'Failed to acquire lock to download thumbnails for @video-filename.', array('@video-filename' => $video->filename), WATCHDOG_ERROR);
+          watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': lock.'); // TODO: delete later.
           return;
         }
       }
@@ -755,6 +770,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       $currentthumb = isset($entity->{$fieldname}[$langcode][$delta]['thumbnail']) ? intval($entity->{$fieldname}[$langcode][$delta]['thumbnail']) : 0;
       if (empty($thumbs) || isset($thumbs[$currentthumb])) {
         echo 'OK: Thumbnail already set';
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': thumbnail already set.'); // TODO: delete later.
         return;
       }
 
@@ -776,6 +792,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
           break;
       }
 
+      watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': OK.'); // TODO: delete later.
       echo 'OK';
     }
     else {
