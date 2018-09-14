@@ -634,6 +634,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       // Clear the stat cache to get a fresh value.
       clearstatcache();
       if (!file_exists($outputfile->uri) || filesize($outputfile->uri) != $output->file_size_in_bytes) {
+        watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': going to move file.'); // TODO: delete later.
         if (!$this->moveFile($output->url, $outputfile->uri)) {
           watchdog('transcoder', 'While processing Zencoder postback, failed to copy @source-uri to @target-uri.', array('@source-uri' => $output->url, '@target-uri' => $outputfile->uri), WATCHDOG_ERROR);
           video_jobs::setFailed($video);
@@ -644,6 +645,9 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       }
 
       $outputfile->filesize = $output->file_size_in_bytes;
+      watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': saving file <pre>@file</pre>', array(
+        '@file' => drupal_var_export($outputfile),
+      )); // TODO: delete later.
       file_save($outputfile);
       watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': file saved.'); // TODO: delete later.
 
