@@ -800,6 +800,7 @@ class TranscoderAbstractionFactoryZencoder extends TranscoderAbstractionFactory 
       echo 'OK';
     }
     else {
+      watchdog('transcoder_debug', 'Zencoder postback for ' . $notification->job->id  .': locked.'); // TODO: delete later.
       drupal_add_http_header('Status', '503 Service Temporarily Unavailable');
       echo 'Lock could not be acquired.';
       exit();
